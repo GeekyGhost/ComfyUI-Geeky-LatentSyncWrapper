@@ -1,18 +1,16 @@
-# ComfyUI-LatentSyncWrapper 1.5
+# ComfyUI-Geeky-LatentSyncWrapper 1.5
 
-## Support My Work
-If you find this project helpful, consider buying me a coffee:
+Unofficial enhanced fork of [LatentSync 1.5](https://github.com/bytedance/LatentSync) implementation for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) on Windows and WSL 2.0.
 
-[![Buy Me A Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=shmuelronen&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/shmuelronen)
+This node provides advanced lip-sync capabilities in ComfyUI using ByteDance's LatentSync 1.5 model. It allows you to synchronize video lips with audio input with improved temporal consistency and better performance on a wider range of languages. This fork adds support for both single images and batch image processing.
 
-Unofficial [LatentSync 1.5](https://github.com/bytedance/LatentSync) implementation for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) on Windows and WSL 2.0.
+## What's new in this fork?
 
-This node provides advanced lip-sync capabilities in ComfyUI using ByteDance's LatentSync 1.5 model. It allows you to synchronize video lips with audio input with improved temporal consistency and better performance on a wider range of languages.
+1. **Single Image Support**: Process individual images with LatentSync
+2. **Batch Image Processing**: Process multiple images in a batch for efficient workflows
+3. **All original LatentSync 1.5 features**: Enhanced temporal consistency, better language support, and reduced VRAM requirements
 
-![image](https://github.com/user-attachments/assets/85e4dafe-2adf-4994-9440-8a435a5ea6d8)
-
-
-## What's new in LatentSync 1.5?
+## Original LatentSync 1.5 Features
 
 1. **Temporal Layer Improvements**: Corrected implementation now provides significantly improved temporal consistency compared to version 1.0
 2. **Better Chinese Language Support**: Performance on Chinese videos is now substantially improved through additional training data
@@ -41,8 +39,8 @@ Only proceed with installation after confirming all prerequisites are installed 
 1. Clone this repository into your ComfyUI custom_nodes directory:
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper.git
-cd ComfyUI-LatentSyncWrapper
+git clone https://github.com/GeekyGhost/ComfyUI-Geeky-LatentSyncWrapper.git
+cd ComfyUI-Geeky-LatentSyncWrapper
 pip install -r requirements.txt
 ```
 
@@ -91,6 +89,7 @@ Make sure all these files are present for proper functionality. The main model f
 
 ## Usage
 
+### For Videos:
 1. Select an input video file with AceNodes video loader
 2. Load an audio file using ComfyUI audio loader
 3. (Optional) Set a seed value for reproducible results
@@ -99,11 +98,28 @@ Make sure all these files are present for proper functionality. The main model f
 6. Connect to the LatentSync1.5 node
 7. Run the workflow
 
-The processed video will be saved in ComfyUI's output directory.
+### For Single Images:
+1. Load a single image using ComfyUI's image loader
+2. Load an audio file using ComfyUI audio loader
+3. Connect to the LatentSync1.5 node with the single image mode enabled
+4. Adjust parameters as needed
+5. Run the workflow
+
+### For Batch Images:
+1. Load multiple images using ComfyUI's batch image loader or image list to batch node
+2. Load an audio file using ComfyUI audio loader
+3. Connect to the LatentSync1.5 node with the batch processing mode enabled
+4. Adjust parameters as needed
+5. Run the workflow
+
+The processed video or images will be saved in ComfyUI's output directory.
 
 ### Node Parameters:
-- `video_path`: Path to input video file
-- `audio`: Audio input from AceNodes audio loader
+- `input_type`: Select between video, single image, or batch images
+- `video_path`: Path to input video file (for video mode)
+- `image`: Input single image (for single image mode)
+- `image_batch`: Input batch of images (for batch image mode)
+- `audio`: Audio input from ComfyUI audio loader
 - `seed`: Random seed for reproducible results (default: 1247)
 - `lips_expression`: Controls the expressiveness of lip movements (default: 1.5)
   - Higher values (2.0-3.0): More pronounced lip movements, better for expressive speech
@@ -113,6 +129,8 @@ The processed video will be saved in ComfyUI's output directory.
   - Higher values (30-50): Better quality results but slower processing
   - Lower values (10-15): Faster processing but potentially lower quality
   - The default of 20 usually provides a good balance between quality and speed
+- `batch_size`: Number of images to process at once in batch mode (default: 4)
+  - Higher values may require more VRAM
 
 ### Tips for Better Results:
 - For speeches or presentations where clear lip movements are important, try increasing the lips_expression value to 2.0-2.5
@@ -121,18 +139,21 @@ The processed video will be saved in ComfyUI's output directory.
 - Different values may work better for different languages and speech patterns
 - If you need higher quality results and have time to wait, increase inference_steps to 30-50
 - For quicker previews or less critical applications, reduce inference_steps to 10-15
+- When processing batch images, adjust batch_size based on your available VRAM
 
 ## Known Limitations
 
-- Works best with clear, frontal face videos
+- Works best with clear, frontal face images/videos
 - Currently does not support anime/cartoon faces
 - Video should be at 25 FPS (will be automatically converted)
-- Face should be visible throughout the video
+- Face should be visible throughout the image/video
+- Batch processing may require significant VRAM depending on batch size
 
 ## Credits
 
-This is an unofficial implementation based on:
+This fork is based on:
 - [LatentSync 1.5](https://github.com/bytedance/LatentSync) by ByteDance Research
+- [ComfyUI-LatentSyncWrapper](https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper) by ShmuelRonen
 - [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
 
 ## License
