@@ -1,0 +1,12 @@
+diffusers
+mediapipe>=0.10.8
+transformers
+huggingface-hub
+omegaconf
+einops
+opencv-python
+face-alignment
+decord
+ffmpeg-python>=0.2.0
+safetensors
+soundfile
