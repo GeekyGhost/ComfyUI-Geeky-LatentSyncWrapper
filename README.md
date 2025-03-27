@@ -4,6 +4,12 @@ Unofficial enhanced fork of [LatentSync 1.5](https://github.com/bytedance/Latent
 
 This node provides advanced lip-sync capabilities in ComfyUI using ByteDance's LatentSync 1.5 model. It allows you to synchronize video lips with audio input with improved temporal consistency and better performance on a wider range of languages. This fork adds support for both single images and batch image processing.
 
+<img width="883" alt="Screenshot 2025-03-27 082328" src="https://github.com/user-attachments/assets/9cb30dd5-3507-4565-a917-ae0ede1a2e89" />
+
+
+<img width="748" alt="Screenshot 2025-03-27 082535" src="https://github.com/user-attachments/assets/3fb7a39e-da9e-444c-a43a-15de48fa57a9" />
+
+
 ## What's new in this fork?
 
 1. **Single Image Support**: Process individual images with LatentSync
