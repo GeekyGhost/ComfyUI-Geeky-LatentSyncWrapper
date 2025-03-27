@@ -341,7 +341,7 @@ def setup_models():
             print(f"   with whisper/tiny.pt in: {whisper_dir}")
             raise RuntimeError("Model download failed. See instructions above.")
 
-class LatentSyncNode:
+class GeekyLatentSyncNode:
     def __init__(self):
         # Make sure our temp directory is the current one
         global MODULE_TEMP_DIR
@@ -370,7 +370,7 @@ class LatentSyncNode:
                     "inference_steps": ("INT", {"default": 20, "min": 1, "max": 999, "step": 1}),
                  },}
 
-    CATEGORY = "LatentSyncNode"
+    CATEGORY = "GeekyLatentSync"
 
     RETURN_TYPES = ("IMAGE", "AUDIO")
     RETURN_NAMES = ("images", "audio") 
@@ -656,7 +656,7 @@ class LatentSyncNode:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-class VideoLengthAdjuster:
+class GeekyVideoLengthAdjuster:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -669,7 +669,7 @@ class VideoLengthAdjuster:
             }
         }
 
-    CATEGORY = "LatentSyncNode"
+    CATEGORY = "GeekyLatentSync"
     RETURN_TYPES = ("IMAGE", "AUDIO")
     RETURN_NAMES = ("images", "audio")
     FUNCTION = "adjust"
@@ -754,12 +754,12 @@ class VideoLengthAdjuster:
 
 # Node Mappings for ComfyUI
 NODE_CLASS_MAPPINGS = {
-    "LatentSyncNode": LatentSyncNode,
-    "VideoLengthAdjuster": VideoLengthAdjuster,
+    "GeekyLatentSyncNode": GeekyLatentSyncNode,
+    "GeekyVideoLengthAdjuster": GeekyVideoLengthAdjuster,
 }
 
 # Display Names for ComfyUI
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LatentSyncNode": "LatentSync1.5 Node",
-    "VideoLengthAdjuster": "Video Length Adjuster",
+    "GeekyLatentSyncNode": "Geeky LatentSync 1.5",
+    "GeekyVideoLengthAdjuster": "Geeky Video Length Adjuster",
 }
