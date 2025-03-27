@@ -217,7 +217,6 @@ def check_and_install_dependencies():
 
     required_packages = [
         'omegaconf',
-        'pytorch_lightning',
         'transformers',
         'accelerate',
         'huggingface_hub',
