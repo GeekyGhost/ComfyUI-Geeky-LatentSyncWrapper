@@ -3,6 +3,10 @@ import tempfile
 import uuid
 import sys
 import shutil
+import time
+
+# Global model cache to avoid reloading models
+_MODEL_CACHE = {}
 
 # Function to find ComfyUI directories
 def get_comfyui_temp_dir():
@@ -83,6 +87,12 @@ def init_temp_directories():
     temp_base_path = os.path.join(system_temp, f"latentsync_{unique_id}")
     os.makedirs(temp_base_path, exist_ok=True)
     
+    # Create a persistent model cache directory
+    model_cache_dir = os.path.join(system_temp, "latentsync_model_cache")
+    os.makedirs(model_cache_dir, exist_ok=True)
+    # Link it into our temp directory for convenience
+    os.symlink(model_cache_dir, os.path.join(temp_base_path, "model_cache"), target_is_directory=True)
+    
     # Override environment variables that control temp directories
     os.environ['TMPDIR'] = temp_base_path
     os.environ['TEMP'] = temp_base_path
@@ -118,13 +128,25 @@ def init_temp_directories():
 # Function to clean up everything when the module exits
 def module_cleanup():
     """Clean up all resources when the module is unloaded"""
-    global MODULE_TEMP_DIR
+    global MODULE_TEMP_DIR, _MODEL_CACHE
     
-    # Clean up our module temp directory
+    # Clear model cache references to free memory
+    _MODEL_CACHE.clear()
+    
+    # Clean up temp directory except model cache
     if MODULE_TEMP_DIR and os.path.exists(MODULE_TEMP_DIR):
         try:
-            shutil.rmtree(MODULE_TEMP_DIR, ignore_errors=True)
-            print(f"Cleaned up module temp directory: {MODULE_TEMP_DIR}")
+            for item in os.listdir(MODULE_TEMP_DIR):
+                if item != "model_cache":
+                    path = os.path.join(MODULE_TEMP_DIR, item)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                    else:
+                        try:
+                            os.remove(path)
+                        except:
+                            pass
+            print(f"Cleaned up module temp directory (preserving model cache)")
         except:
             pass
     
@@ -163,12 +185,44 @@ else:
     # Add the function if it doesn't exist
     setattr(folder_paths, 'get_temp_directory', lambda: MODULE_TEMP_DIR)
 
+def get_cached_model(model_path, model_type, device):
+    """Load model from cache or disk and cache it"""
+    global _MODEL_CACHE
+    cache_key = f"{model_type}_{model_path}"
+    
+    if cache_key in _MODEL_CACHE:
+        # Check if the cached model is on the right device
+        cached_model = _MODEL_CACHE[cache_key]
+        model_device = next(cached_model.parameters()).device
+        if str(model_device) == str(device):
+            print(f"Using cached {model_type} model")
+            return cached_model
+        else:
+            print(f"Moving cached {model_type} model to {device}")
+            cached_model = cached_model.to(device)
+            return cached_model
+    
+    print(f"Loading {model_type} model from disk")
+    # Load the model
+    model = torch.load(model_path, map_location=device)
+    
+    # Cache the model
+    _MODEL_CACHE[cache_key] = model
+    return model
+
 def import_inference_script(script_path):
     """Import a Python file as a module using its file path."""
     if not os.path.exists(script_path):
         raise ImportError(f"Script not found: {script_path}")
 
     module_name = "latentsync_inference"
+    
+    # Check if the module is already loaded
+    if module_name in sys.modules:
+        print("Using previously imported inference module")
+        return sys.modules[module_name]
+    
+    print(f"Importing inference script from {script_path}")
     spec = importlib.util.spec_from_file_location(module_name, script_path)
     if spec is None:
         raise ImportError(f"Failed to create module spec for {script_path}")
@@ -214,7 +268,6 @@ def check_ffmpeg():
 def check_and_install_dependencies():
     if not check_ffmpeg():
         raise RuntimeError("FFmpeg is required but not found")
-
     required_packages = [
         'omegaconf',
         'transformers',
@@ -224,10 +277,20 @@ def check_and_install_dependencies():
         'diffusers',
         'ffmpeg-python' 
     ]
-
+    
+    # Check if we've already run this function successfully
+    cache_dir = os.path.join(MODULE_TEMP_DIR, "model_cache")
+    # Create the cache directory if it doesn't exist
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    cache_marker = os.path.join(cache_dir, ".deps_installed")
+    if os.path.exists(cache_marker):
+        print("Dependencies already verified, skipping check.")
+        return
+        
     def is_package_installed(package_name):
         return importlib.util.find_spec(package_name) is not None
-
+        
     def install_package(package):
         python_exe = sys.executable
         try:
@@ -238,15 +301,29 @@ def check_and_install_dependencies():
         except subprocess.CalledProcessError as e:
             print(f"Error installing {package}: {str(e)}")
             raise RuntimeError(f"Failed to install required package: {package}")
-
+            
+    missing_packages = []
     for package in required_packages:
         if not is_package_installed(package):
-            print(f"Installing required package: {package}")
+            missing_packages.append(package)
+    
+    if missing_packages:
+        print(f"Installing missing packages: {', '.join(missing_packages)}")
+        for package in missing_packages:
             try:
                 install_package(package)
             except Exception as e:
                 print(f"Warning: Failed to install {package}: {str(e)}")
                 raise
+    else:
+        print("All required packages are already installed.")
+    
+    # Create marker file
+    try:
+        with open(cache_marker, 'w') as f:
+            f.write(f"Dependencies checked on {time.ctime()}")
+    except Exception as e:
+        print(f"Warning: Could not create cache marker file: {str(e)}")
 
 def normalize_path(path):
     """Normalize path to handle spaces and special characters"""
@@ -277,10 +354,24 @@ def get_ext_dir(subpath=None, mkdir=False):
 def download_model(url, save_path):
     """Download a model from a URL and save it to the specified path."""
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    # Check if file already exists
+    if os.path.exists(save_path):
+        print(f"Model file already exists at {save_path}, skipping download.")
+        return
+        
+    print(f"Downloading {url} to {save_path}...")
     response = requests.get(url, stream=True)
+    total_size = int(response.headers.get('content-length', 0))
+    downloaded = 0
+    
     with open(save_path, "wb") as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
+            downloaded += len(chunk)
+            if total_size > 0:
+                percent = (downloaded / total_size) * 100
+                print(f"\rDownload progress: {percent:.1f}%", end="")
+    print("\nDownload complete")
 
 def pre_download_models():
     """Pre-download all required models."""
@@ -292,6 +383,12 @@ def pre_download_models():
     cache_dir = os.path.join(MODULE_TEMP_DIR, "model_cache")
     os.makedirs(cache_dir, exist_ok=True)
     
+    # Check if we've already run this function successfully by creating a marker file
+    cache_marker = os.path.join(cache_dir, ".cache_complete")
+    if os.path.exists(cache_marker):
+        print("Pre-downloaded models already exist, skipping download.")
+        return
+    
     for model_name, url in models.items():
         save_path = os.path.join(cache_dir, model_name)
         if not os.path.exists(save_path):
@@ -299,6 +396,10 @@ def pre_download_models():
             download_model(url, save_path)
         else:
             print(f"{model_name} already exists in cache.")
+    
+    # Create marker file to indicate successful completion
+    with open(cache_marker, 'w') as f:
+        f.write(f"Cache completed on {time.ctime()}")
 
 def setup_models():
     """Setup and pre-download all required models."""
@@ -322,24 +423,28 @@ def setup_models():
     unet_path = os.path.join(ckpt_dir, "latentsync_unet.pt")
     whisper_path = os.path.join(whisper_dir, "tiny.pt")
 
-    if not (os.path.exists(unet_path) and os.path.exists(whisper_path)):
-        print("Downloading required model checkpoints... This may take a while.")
-        try:
-            from huggingface_hub import snapshot_download
-            snapshot_download(repo_id="ByteDance/LatentSync-1.5",
-                             allow_patterns=["latentsync_unet.pt", "whisper/tiny.pt"],
-                             local_dir=ckpt_dir, 
-                             local_dir_use_symlinks=False,
-                             cache_dir=temp_downloads)
-            print("Model checkpoints downloaded successfully!")
-        except Exception as e:
-            print(f"Error downloading models: {str(e)}")
-            print("\nPlease download models manually:")
-            print("1. Visit: https://huggingface.co/chunyu-li/LatentSync")
-            print("2. Download: latentsync_unet.pt and whisper/tiny.pt")
-            print(f"3. Place them in: {ckpt_dir}")
-            print(f"   with whisper/tiny.pt in: {whisper_dir}")
-            raise RuntimeError("Model download failed. See instructions above.")
+    # Only download if the files don't already exist
+    if os.path.exists(unet_path) and os.path.exists(whisper_path):
+        print("Model checkpoints already exist, skipping download.")
+        return
+        
+    print("Downloading required model checkpoints... This may take a while.")
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo_id="ByteDance/LatentSync-1.5",
+                         allow_patterns=["latentsync_unet.pt", "whisper/tiny.pt"],
+                         local_dir=ckpt_dir, 
+                         local_dir_use_symlinks=False,
+                         cache_dir=temp_downloads)
+        print("Model checkpoints downloaded successfully!")
+    except Exception as e:
+        print(f"Error downloading models: {str(e)}")
+        print("\nPlease download models manually:")
+        print("1. Visit: https://huggingface.co/chunyu-li/LatentSync")
+        print("2. Download: latentsync_unet.pt and whisper/tiny.pt")
+        print(f"3. Place them in: {ckpt_dir}")
+        print(f"   with whisper/tiny.pt in: {whisper_dir}")
+        raise RuntimeError("Model download failed. See instructions above.")
 
 class GeekyLatentSyncNode:
     def __init__(self):
@@ -349,8 +454,8 @@ class GeekyLatentSyncNode:
             os.makedirs(MODULE_TEMP_DIR, exist_ok=True)
         
         # Ensure ComfyUI temp doesn't exist
-        comfyui_temp = "D:\\ComfyUI_windows\\temp"
-        if os.path.exists(comfyui_temp):
+        comfyui_temp = get_comfyui_temp_dir()
+        if comfyui_temp and os.path.exists(comfyui_temp):
             backup_name = f"{comfyui_temp}_backup_{uuid.uuid4().hex[:8]}"
             try:
                 os.rename(comfyui_temp, backup_name)
@@ -368,6 +473,7 @@ class GeekyLatentSyncNode:
                     "seed": ("INT", {"default": 1247}),
                     "lips_expression": ("FLOAT", {"default": 1.5, "min": 1.0, "max": 3.0, "step": 0.1}),
                     "inference_steps": ("INT", {"default": 20, "min": 1, "max": 999, "step": 1}),
+                    "vram_usage": (["high", "medium", "low"], {"default": "medium"}),
                  },}
 
     CATEGORY = "GeekyLatentSync"
@@ -387,51 +493,66 @@ class GeekyLatentSyncNode:
                 processed_batch = processed_batch[..., :3]
             return processed_batch
 
-    def inference(self, images, audio, seed, lips_expression=1.5, inference_steps=20):
+    def inference(self, images, audio, seed, lips_expression=1.5, inference_steps=20, vram_usage="medium"):
+        # Add timing information
+        import time
+        start_time = time.time()
+        
         # Use our module temp directory
         global MODULE_TEMP_DIR
         
+        # Define timing checkpoint function
+        def log_timing(step):
+            elapsed = time.time() - start_time
+            print(f"[{elapsed:.2f}s] {step}")
+        
+        log_timing("Starting inference")
+        
         # Get GPU capabilities and memory
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        BATCH_SIZE = 4
         use_mixed_precision = False
+        
+        # Set VRAM usage based on user preference
         if torch.cuda.is_available():
             gpu_mem = torch.cuda.get_device_properties(0).total_memory
-            # Convert to GB
             gpu_mem_gb = gpu_mem / (1024 ** 3)
-
-            # Dynamically adjust batch size based on GPU memory
-            if gpu_mem_gb > 20:  # High-end GPUs
-                BATCH_SIZE = 32
-                enable_tf32 = True
+            
+            # Dynamic batch size and settings based on VRAM usage preference
+            if vram_usage == "high":
+                BATCH_SIZE = min(32, 120 // inference_steps)
                 use_mixed_precision = True
-            elif gpu_mem_gb > 8:  # Mid-range GPUs
-                BATCH_SIZE = 16
-                enable_tf32 = False
-                use_mixed_precision = True
-            else:  # Lower-end GPUs
-                BATCH_SIZE = 8
-                enable_tf32 = False
-                use_mixed_precision = False
-
-            # Set performance options based on GPU capability
-            torch.backends.cudnn.benchmark = True
-            if enable_tf32:
-                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cuda.matmul.allow_tf32 = True if hasattr(torch.backends.cuda, "matmul") else False
                 torch.backends.cudnn.allow_tf32 = True
-
+                torch.cuda.set_per_process_memory_fraction(0.95)
+                print(f"Using high VRAM settings with {BATCH_SIZE} batch size")
+            elif vram_usage == "medium":
+                BATCH_SIZE = min(16, 80 // inference_steps)
+                use_mixed_precision = True
+                torch.backends.cudnn.benchmark = True
+                torch.cuda.set_per_process_memory_fraction(0.85)
+                print(f"Using medium VRAM settings with {BATCH_SIZE} batch size")
+            else:  # low
+                BATCH_SIZE = min(8, 40 // inference_steps)
+                use_mixed_precision = False
+                torch.cuda.set_per_process_memory_fraction(0.75)
+                print(f"Using low VRAM settings with {BATCH_SIZE} batch size")
+                
             # Clear GPU cache before processing
             torch.cuda.empty_cache()
-            torch.cuda.set_per_process_memory_fraction(0.8)
-
+        else:
+            # CPU fallback settings
+            BATCH_SIZE = 4
+            print("No GPU detected, using CPU with minimal batch size")
+        
         # Create a run-specific subdirectory in our temp directory
         run_id = ''.join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(5))
         temp_dir = os.path.join(MODULE_TEMP_DIR, f"run_{run_id}")
         os.makedirs(temp_dir, exist_ok=True)
         
-        # Ensure ComfyUI temp doesn't exist again (in case something recreated it)
-        comfyui_temp = "D:\\ComfyUI_windows\\temp"
-        if os.path.exists(comfyui_temp):
+        # Ensure ComfyUI temp doesn't exist again
+        comfyui_temp = get_comfyui_temp_dir()
+        if comfyui_temp and os.path.exists(comfyui_temp):
             backup_name = f"{comfyui_temp}_backup_{uuid.uuid4().hex[:8]}"
             try:
                 os.rename(comfyui_temp, backup_name)
@@ -451,6 +572,7 @@ class GeekyLatentSyncNode:
             # Get the extension directory
             cur_dir = os.path.dirname(os.path.abspath(__file__))
             
+            log_timing("Processing input frames")
             # Process input frames
             if isinstance(images, list):
                 frames = torch.stack(images).to(device)
@@ -488,6 +610,7 @@ class GeekyLatentSyncNode:
                 frames = duplicated_frames
                 print(f"Duplicated single image to create {required_frames} frames matching audio duration")
 
+            log_timing("Processing audio")
             # Resample audio if needed
             if sample_rate != 16000:
                 new_sample_rate = 16000
@@ -504,6 +627,7 @@ class GeekyLatentSyncNode:
                 "sample_rate": sample_rate
             }
             
+            log_timing("Saving temporary files")
             # Move waveform to CPU for saving
             waveform_cpu = waveform.cpu()
             torchaudio.save(audio_path, waveform_cpu, sample_rate)
@@ -528,7 +652,13 @@ class GeekyLatentSyncNode:
                 packet = stream.encode(None)
                 container.mux(packet)
                 container.close()
+            
+            # Free up memory after saving
+            del frames_cpu, waveform_cpu
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
+            log_timing("Setting up model paths")
             # Define paths to required files and configs
             inference_script_path = os.path.join(cur_dir, "scripts", "inference.py")
             config_path = os.path.join(cur_dir, "configs", "unet", "stage2.yaml")
@@ -584,12 +714,14 @@ class GeekyLatentSyncNode:
                 torch.cuda.empty_cache()
                 
             # Check and prevent ComfyUI temp creation again
-            if os.path.exists(comfyui_temp):
+            comfyui_temp = get_comfyui_temp_dir()
+            if comfyui_temp and os.path.exists(comfyui_temp):
                 try:
                     os.rename(comfyui_temp, f"{comfyui_temp}_backup_{uuid.uuid4().hex[:8]}")
                 except:
                     pass
 
+            log_timing("Importing inference module")
             # Import the inference module
             inference_module = import_inference_script(inference_script_path)
             
@@ -601,9 +733,11 @@ class GeekyLatentSyncNode:
             inference_temp = os.path.join(temp_dir, "temp")
             os.makedirs(inference_temp, exist_ok=True)
             
+            log_timing("Running inference")
             # Run inference
             inference_module.main(config, args)
 
+            log_timing("Processing output")
             # Clean GPU cache after inference
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -613,6 +747,7 @@ class GeekyLatentSyncNode:
                 raise FileNotFoundError(f"Output video not found at: {output_video_path}")
             
             # Read the processed video - ensure it's loaded as CPU tensor
+            import torchvision.io as io
             processed_frames = io.read_video(output_video_path, pts_unit='sec')[0]
             processed_frames = processed_frames.float() / 255.0
 
@@ -623,6 +758,9 @@ class GeekyLatentSyncNode:
                 if hasattr(processed_frames, 'device') and processed_frames.device.type == 'cuda':
                     processed_frames = processed_frames.cpu()
 
+            total_time = time.time() - start_time
+            print(f"Total processing time: {total_time:.2f}s")
+            
             return (processed_frames, resampled_audio)
 
         except Exception as e:
@@ -632,29 +770,26 @@ class GeekyLatentSyncNode:
             raise
 
         finally:
-            # Clean up temporary files individually
-            for path in [temp_video_path, output_video_path, audio_path]:
-                if path and os.path.exists(path):
-                    try:
-                        os.remove(path)
-                        print(f"Removed temporary file: {path}")
-                    except Exception as e:
-                        print(f"Failed to remove {path}: {str(e)}")
-
-            # Remove temporary run directory
-            if temp_dir and os.path.exists(temp_dir):
-                try:
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    print(f"Removed run temporary directory: {temp_dir}")
-                except Exception as e:
-                    print(f"Failed to remove temp run directory: {str(e)}")
-
-            # Clean up any ComfyUI temp directories again (in case they were created during execution)
-            cleanup_comfyui_temp_directories()
+            # Cleanup GPU memory
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+            # Only remove temporary files if successful (keep for debugging if failed)
+            try:
+                # Clean up temporary files individually
+                for path in [temp_video_path, output_video_path, audio_path]:
+                    if path and os.path.exists(path):
+                        try:
+                            os.remove(path)
+                        except:
+                            pass
+            except:
+                pass  # Ignore cleanup errors
 
             # Final GPU cache cleanup
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+
 
 class GeekyVideoLengthAdjuster:
     @classmethod
