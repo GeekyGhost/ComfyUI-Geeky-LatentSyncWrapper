@@ -4,9 +4,7 @@ Unofficial **optimized and enhanced** fork of [LatentSync 1.5](https://github.co
 
 This node provides advanced lip-sync capabilities in ComfyUI using ByteDance's LatentSync 1.5 model with **significantly improved performance, memory efficiency, and stability**. This fork focuses on speed, reliability, and conflict-free coexistence with other LatentSync implementations.
 
-<img width="883" alt="Screenshot 2025-03-27 082328" src="https://github.com/user-attachments/assets/9cb30dd5-3507-4565-a917-ae0ede1a2e89" />
-
-<img width="748" alt="Screenshot 2025-03-27 082535" src="https://github.com/user-attachments/assets/3fb7a39e-da9e-444c-a43a-15de48fa57a9" />
+<img width="1893" height="1357" alt="workflow (4)" src="https://github.com/user-attachments/assets/51d3b98a-e549-4c71-a2f2-2af5cc52f291" />
 
 ## Why This Fork? Performance & Stability
 
