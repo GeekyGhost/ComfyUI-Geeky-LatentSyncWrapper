@@ -5,8 +5,23 @@ import sys
 import shutil
 import time
 
-# Global model cache to avoid reloading models
-_MODEL_CACHE = {}
+# Global model cache to avoid reloading models - Using unique name to avoid conflicts
+_GEEKY_MODEL_CACHE = {}
+
+# Function to check for potential conflicts with other LatentSync implementations
+def check_for_conflicts():
+    """Check if other LatentSync implementations might conflict"""
+    try:
+        import folder_paths
+        custom_nodes_dir = folder_paths.get_folder_paths("custom_nodes")[0]
+        original_path = os.path.join(custom_nodes_dir, "ComfyUI-LatentSyncWrapper")
+        
+        if os.path.exists(original_path):
+            print("[Geeky LatentSync] Detected ComfyUI-LatentSyncWrapper - using isolated paths to avoid conflicts")
+            return True
+    except:
+        pass
+    return False
 
 # Function to find ComfyUI directories
 def get_comfyui_temp_dir():
@@ -75,6 +90,10 @@ def cleanup_comfyui_temp_directories():
     except Exception as e:
         print(f"Error cleaning up temp directories: {str(e)}")
 
+def get_unique_temp_path(suffix=""):
+    """Generate unique temp paths for geeky wrapper"""
+    return os.path.join(tempfile.gettempdir(), f"geeky_latentsync_{uuid.uuid4().hex[:8]}{suffix}")
+
 # Create a module-level function to set up system-wide temp directory
 def init_temp_directories():
     """Initialize global temporary directory settings"""
@@ -84,14 +103,18 @@ def init_temp_directories():
     # Generate a unique base directory for this module
     system_temp = tempfile.gettempdir()
     unique_id = str(uuid.uuid4())[:8]
-    temp_base_path = os.path.join(system_temp, f"latentsync_{unique_id}")
+    temp_base_path = os.path.join(system_temp, f"geeky_latentsync_{unique_id}")
     os.makedirs(temp_base_path, exist_ok=True)
     
     # Create a persistent model cache directory
-    model_cache_dir = os.path.join(system_temp, "latentsync_model_cache")
+    model_cache_dir = os.path.join(system_temp, "geeky_latentsync_model_cache")
     os.makedirs(model_cache_dir, exist_ok=True)
     # Link it into our temp directory for convenience
-    os.symlink(model_cache_dir, os.path.join(temp_base_path, "model_cache"), target_is_directory=True)
+    try:
+        os.symlink(model_cache_dir, os.path.join(temp_base_path, "model_cache"), target_is_directory=True)
+    except (OSError, NotImplementedError):
+        # If symlinks aren't supported, just use the cache dir directly
+        shutil.copytree(model_cache_dir, os.path.join(temp_base_path, "model_cache"), dirs_exist_ok=True)
     
     # Override environment variables that control temp directories
     os.environ['TMPDIR'] = temp_base_path
@@ -128,10 +151,10 @@ def init_temp_directories():
 # Function to clean up everything when the module exits
 def module_cleanup():
     """Clean up all resources when the module is unloaded"""
-    global MODULE_TEMP_DIR, _MODEL_CACHE
+    global MODULE_TEMP_DIR, _GEEKY_MODEL_CACHE
     
     # Clear model cache references to free memory
-    _MODEL_CACHE.clear()
+    _GEEKY_MODEL_CACHE.clear()
     
     # Clean up temp directory except model cache
     if MODULE_TEMP_DIR and os.path.exists(MODULE_TEMP_DIR):
@@ -177,6 +200,9 @@ from PIL import Image
 from decimal import Decimal, ROUND_UP
 import requests
 
+# Check for conflicts with other implementations
+conflict_detected = check_for_conflicts()
+
 # Modify folder_paths module to use our temp directory
 if hasattr(folder_paths, "get_temp_directory"):
     original_get_temp = folder_paths.get_temp_directory
@@ -186,28 +212,28 @@ else:
     setattr(folder_paths, 'get_temp_directory', lambda: MODULE_TEMP_DIR)
 
 def get_cached_model(model_path, model_type, device):
-    """Load model from cache or disk and cache it"""
-    global _MODEL_CACHE
-    cache_key = f"{model_type}_{model_path}"
+    """Load model from geeky-specific cache or disk and cache it"""
+    global _GEEKY_MODEL_CACHE
+    cache_key = f"geeky_{model_type}_{model_path}"
     
-    if cache_key in _MODEL_CACHE:
+    if cache_key in _GEEKY_MODEL_CACHE:
         # Check if the cached model is on the right device
-        cached_model = _MODEL_CACHE[cache_key]
+        cached_model = _GEEKY_MODEL_CACHE[cache_key]
         model_device = next(cached_model.parameters()).device
         if str(model_device) == str(device):
-            print(f"Using cached {model_type} model")
+            print(f"Using cached {model_type} model from Geeky cache")
             return cached_model
         else:
             print(f"Moving cached {model_type} model to {device}")
             cached_model = cached_model.to(device)
             return cached_model
     
-    print(f"Loading {model_type} model from disk")
+    print(f"Loading {model_type} model from disk into Geeky cache")
     # Load the model
     model = torch.load(model_path, map_location=device)
     
     # Cache the model
-    _MODEL_CACHE[cache_key] = model
+    _GEEKY_MODEL_CACHE[cache_key] = model
     return model
 
 def import_inference_script(script_path):
@@ -215,14 +241,14 @@ def import_inference_script(script_path):
     if not os.path.exists(script_path):
         raise ImportError(f"Script not found: {script_path}")
 
-    module_name = "latentsync_inference"
+    module_name = "geeky_latentsync_inference"  # Unique module name
     
     # Check if the module is already loaded
     if module_name in sys.modules:
-        print("Using previously imported inference module")
+        print("Using previously imported Geeky inference module")
         return sys.modules[module_name]
     
-    print(f"Importing inference script from {script_path}")
+    print(f"Importing Geeky inference script from {script_path}")
     spec = importlib.util.spec_from_file_location(module_name, script_path)
     if spec is None:
         raise ImportError(f"Failed to create module spec for {script_path}")
@@ -283,9 +309,9 @@ def check_and_install_dependencies():
     # Create the cache directory if it doesn't exist
     os.makedirs(cache_dir, exist_ok=True)
     
-    cache_marker = os.path.join(cache_dir, ".deps_installed")
+    cache_marker = os.path.join(cache_dir, ".geeky_deps_installed")
     if os.path.exists(cache_marker):
-        print("Dependencies already verified, skipping check.")
+        print("Geeky dependencies already verified, skipping check.")
         return
         
     def is_package_installed(package_name):
@@ -321,7 +347,7 @@ def check_and_install_dependencies():
     # Create marker file
     try:
         with open(cache_marker, 'w') as f:
-            f.write(f"Dependencies checked on {time.ctime()}")
+            f.write(f"Geeky dependencies checked on {time.ctime()}")
     except Exception as e:
         print(f"Warning: Could not create cache marker file: {str(e)}")
 
@@ -384,9 +410,9 @@ def pre_download_models():
     os.makedirs(cache_dir, exist_ok=True)
     
     # Check if we've already run this function successfully by creating a marker file
-    cache_marker = os.path.join(cache_dir, ".cache_complete")
+    cache_marker = os.path.join(cache_dir, ".geeky_cache_complete")
     if os.path.exists(cache_marker):
-        print("Pre-downloaded models already exist, skipping download.")
+        print("Pre-downloaded Geeky models already exist, skipping download.")
         return
     
     for model_name, url in models.items():
@@ -395,11 +421,11 @@ def pre_download_models():
             print(f"Downloading {model_name}...")
             download_model(url, save_path)
         else:
-            print(f"{model_name} already exists in cache.")
+            print(f"{model_name} already exists in Geeky cache.")
     
     # Create marker file to indicate successful completion
     with open(cache_marker, 'w') as f:
-        f.write(f"Cache completed on {time.ctime()}")
+        f.write(f"Geeky cache completed on {time.ctime()}")
 
 def setup_models():
     """Setup and pre-download all required models."""
@@ -409,9 +435,9 @@ def setup_models():
     # Pre-download additional models
     pre_download_models()
 
-    # Existing setup logic for LatentSync models
+    # Existing setup logic for LatentSync models - using unique directory
     cur_dir = get_ext_dir()
-    ckpt_dir = os.path.join(cur_dir, "checkpoints")
+    ckpt_dir = os.path.join(cur_dir, "geeky_checkpoints")  # Changed from "checkpoints" to "geeky_checkpoints"
     whisper_dir = os.path.join(ckpt_dir, "whisper")
     os.makedirs(ckpt_dir, exist_ok=True)
     os.makedirs(whisper_dir, exist_ok=True)
@@ -425,10 +451,10 @@ def setup_models():
 
     # Only download if the files don't already exist
     if os.path.exists(unet_path) and os.path.exists(whisper_path):
-        print("Model checkpoints already exist, skipping download.")
+        print("Geeky model checkpoints already exist, skipping download.")
         return
         
-    print("Downloading required model checkpoints... This may take a while.")
+    print("Downloading required Geeky model checkpoints... This may take a while.")
     try:
         from huggingface_hub import snapshot_download
         snapshot_download(repo_id="ByteDance/LatentSync-1.5",
@@ -436,15 +462,15 @@ def setup_models():
                          local_dir=ckpt_dir, 
                          local_dir_use_symlinks=False,
                          cache_dir=temp_downloads)
-        print("Model checkpoints downloaded successfully!")
+        print("Geeky model checkpoints downloaded successfully!")
     except Exception as e:
-        print(f"Error downloading models: {str(e)}")
-        print("\nPlease download models manually:")
+        print(f"Error downloading Geeky models: {str(e)}")
+        print("\nPlease download models manually for Geeky LatentSync:")
         print("1. Visit: https://huggingface.co/chunyu-li/LatentSync")
         print("2. Download: latentsync_unet.pt and whisper/tiny.pt")
         print(f"3. Place them in: {ckpt_dir}")
         print(f"   with whisper/tiny.pt in: {whisper_dir}")
-        raise RuntimeError("Model download failed. See instructions above.")
+        raise RuntimeError("Geeky model download failed. See instructions above.")
 
 class GeekyLatentSyncNode:
     def __init__(self):
@@ -504,9 +530,9 @@ class GeekyLatentSyncNode:
         # Define timing checkpoint function
         def log_timing(step):
             elapsed = time.time() - start_time
-            print(f"[{elapsed:.2f}s] {step}")
+            print(f"[Geeky {elapsed:.2f}s] {step}")
         
-        log_timing("Starting inference")
+        log_timing("Starting Geeky inference")
         
         # Get GPU capabilities and memory
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -525,18 +551,18 @@ class GeekyLatentSyncNode:
                 torch.backends.cuda.matmul.allow_tf32 = True if hasattr(torch.backends.cuda, "matmul") else False
                 torch.backends.cudnn.allow_tf32 = True
                 torch.cuda.set_per_process_memory_fraction(0.95)
-                print(f"Using high VRAM settings with {BATCH_SIZE} batch size")
+                print(f"Using Geeky high VRAM settings with {BATCH_SIZE} batch size")
             elif vram_usage == "medium":
                 BATCH_SIZE = min(16, 80 // inference_steps)
                 use_mixed_precision = True
                 torch.backends.cudnn.benchmark = True
                 torch.cuda.set_per_process_memory_fraction(0.85)
-                print(f"Using medium VRAM settings with {BATCH_SIZE} batch size")
+                print(f"Using Geeky medium VRAM settings with {BATCH_SIZE} batch size")
             else:  # low
                 BATCH_SIZE = min(8, 40 // inference_steps)
                 use_mixed_precision = False
                 torch.cuda.set_per_process_memory_fraction(0.75)
-                print(f"Using low VRAM settings with {BATCH_SIZE} batch size")
+                print(f"Using Geeky low VRAM settings with {BATCH_SIZE} batch size")
                 
             # Clear GPU cache before processing
             torch.cuda.empty_cache()
@@ -547,7 +573,7 @@ class GeekyLatentSyncNode:
         
         # Create a run-specific subdirectory in our temp directory
         run_id = ''.join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(5))
-        temp_dir = os.path.join(MODULE_TEMP_DIR, f"run_{run_id}")
+        temp_dir = os.path.join(MODULE_TEMP_DIR, f"geeky_run_{run_id}")
         os.makedirs(temp_dir, exist_ok=True)
         
         # Ensure ComfyUI temp doesn't exist again
@@ -565,9 +591,9 @@ class GeekyLatentSyncNode:
 
         try:
             # Create temporary file paths in our system temp directory
-            temp_video_path = os.path.join(temp_dir, f"temp_{run_id}.mp4")
-            output_video_path = os.path.join(temp_dir, f"latentsync_{run_id}_out.mp4")
-            audio_path = os.path.join(temp_dir, f"latentsync_{run_id}_audio.wav")
+            temp_video_path = os.path.join(temp_dir, f"geeky_temp_{run_id}.mp4")
+            output_video_path = os.path.join(temp_dir, f"geeky_latentsync_{run_id}_out.mp4")
+            audio_path = os.path.join(temp_dir, f"geeky_latentsync_{run_id}_audio.wav")
             
             # Get the extension directory
             cur_dir = os.path.dirname(os.path.abspath(__file__))
@@ -608,7 +634,7 @@ class GeekyLatentSyncNode:
                 single_frame = frames[0]
                 duplicated_frames = single_frame.unsqueeze(0).repeat(required_frames, 1, 1, 1)
                 frames = duplicated_frames
-                print(f"Duplicated single image to create {required_frames} frames matching audio duration")
+                print(f"Geeky: Duplicated single image to create {required_frames} frames matching audio duration")
 
             log_timing("Processing audio")
             # Resample audio if needed
@@ -659,12 +685,12 @@ class GeekyLatentSyncNode:
                 torch.cuda.empty_cache()
 
             log_timing("Setting up model paths")
-            # Define paths to required files and configs
+            # Define paths to required files and configs - using geeky_checkpoints
             inference_script_path = os.path.join(cur_dir, "scripts", "inference.py")
             config_path = os.path.join(cur_dir, "configs", "unet", "stage2.yaml")
             scheduler_config_path = os.path.join(cur_dir, "configs")
-            ckpt_path = os.path.join(cur_dir, "checkpoints", "latentsync_unet.pt")
-            whisper_ckpt_path = os.path.join(cur_dir, "checkpoints", "whisper", "tiny.pt")
+            ckpt_path = os.path.join(cur_dir, "geeky_checkpoints", "latentsync_unet.pt")  # Updated path
+            whisper_ckpt_path = os.path.join(cur_dir, "geeky_checkpoints", "whisper", "tiny.pt")  # Updated path
 
             # Create config and args
             config = OmegaConf.load(config_path)
@@ -702,6 +728,25 @@ class GeekyLatentSyncNode:
                 mask_image_path=mask_image_path
             )
 
+            # CRITICAL FIX: Create symlink or copy to handle hardcoded paths in inference script
+            old_checkpoints_dir = os.path.join(cur_dir, "checkpoints")
+            if not os.path.exists(old_checkpoints_dir):
+                try:
+                    # Try to create a symlink first (faster)
+                    os.symlink(os.path.join(cur_dir, "geeky_checkpoints"), old_checkpoints_dir)
+                    print(f"Created symlink from {old_checkpoints_dir} to geeky_checkpoints")
+                except (OSError, NotImplementedError):
+                    # If symlinks aren't supported, copy the directory
+                    shutil.copytree(os.path.join(cur_dir, "geeky_checkpoints"), old_checkpoints_dir, dirs_exist_ok=True)
+                    # Create a marker file so we know this is our temporary copy
+                    with open(os.path.join(old_checkpoints_dir, ".geeky_temp_copy"), 'w') as f:
+                        f.write("Temporary copy created by Geeky LatentSync")
+                    print(f"Copied geeky_checkpoints to {old_checkpoints_dir}")
+            elif os.path.isdir(old_checkpoints_dir) and not os.path.islink(old_checkpoints_dir):
+                # If checkpoints directory exists and is not our symlink, warn user
+                print("Warning: Found existing 'checkpoints' directory. This might conflict with other LatentSync implementations.")
+                print("Geeky LatentSync will use the existing directory but recommend using separate installations.")
+
             # Set PYTHONPATH to include our directories 
             package_root = os.path.dirname(cur_dir)
             if package_root not in sys.path:
@@ -733,7 +778,7 @@ class GeekyLatentSyncNode:
             inference_temp = os.path.join(temp_dir, "temp")
             os.makedirs(inference_temp, exist_ok=True)
             
-            log_timing("Running inference")
+            log_timing("Running Geeky inference")
             # Run inference
             inference_module.main(config, args)
 
@@ -759,12 +804,12 @@ class GeekyLatentSyncNode:
                     processed_frames = processed_frames.cpu()
 
             total_time = time.time() - start_time
-            print(f"Total processing time: {total_time:.2f}s")
+            print(f"Geeky total processing time: {total_time:.2f}s")
             
             return (processed_frames, resampled_audio)
 
         except Exception as e:
-            print(f"Error during inference: {str(e)}")
+            print(f"Error during Geeky inference: {str(e)}")
             import traceback
             traceback.print_exc()
             raise
@@ -773,6 +818,22 @@ class GeekyLatentSyncNode:
             # Cleanup GPU memory
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                
+            # Clean up the temporary symlink/copy created for inference script compatibility
+            try:
+                old_checkpoints_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
+                if os.path.exists(old_checkpoints_dir):
+                    if os.path.islink(old_checkpoints_dir):
+                        os.unlink(old_checkpoints_dir)
+                        print("Cleaned up temporary symlink")
+                    elif os.path.isdir(old_checkpoints_dir):
+                        # Only remove if it's our temporary copy (check if it contains geeky files)
+                        geeky_marker = os.path.join(old_checkpoints_dir, ".geeky_temp_copy")
+                        if os.path.exists(geeky_marker):
+                            shutil.rmtree(old_checkpoints_dir)
+                            print("Cleaned up temporary copy")
+            except:
+                pass  # Ignore cleanup errors
                 
             # Only remove temporary files if successful (keep for debugging if failed)
             try:
@@ -893,8 +954,8 @@ NODE_CLASS_MAPPINGS = {
     "GeekyVideoLengthAdjuster": GeekyVideoLengthAdjuster,
 }
 
-# Display Names for ComfyUI
+# Display Names for ComfyUI - Clear distinction from original
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "GeekyLatentSyncNode": "Geeky LatentSync 1.5",
-    "GeekyVideoLengthAdjuster": "Geeky Video Length Adjuster",
+    "GeekyLatentSyncNode": "Geeky LatentSync 1.5 (Optimized)",
+    "GeekyVideoLengthAdjuster": "Geeky Video Length Adjuster (Fast)",
 }
