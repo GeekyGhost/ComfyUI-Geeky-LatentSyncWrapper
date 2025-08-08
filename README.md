@@ -133,7 +133,7 @@ Make sure all these files are present for proper functionality. The main model f
 ## Usage
 
 ### For Videos:
-1. Select an input video file with AceNodes video loader
+1. Select an input video file with a video loader
 2. Load an audio file using ComfyUI audio loader
 3. (Optional) Set a seed value for reproducible results
 4. (Optional) Adjust the lips_expression parameter to control lip movement intensity
