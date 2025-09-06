@@ -1,4 +1,4 @@
-# (Out Dated) ComfyUI-Geeky-LatentSyncWrapper 1.5 (Mediapipe isn't compatible with some changes, will need to downgrade python version of portable comfyUI and remove xformers). 
+# (Out Dated) ComfyUI-Geeky-LatentSyncWrapper 1.5 (Mediapipe isn't compatible with some changes to ComfyUI, will need to downgrade python version of portable comfyUI and remove xformers). 
 
 Unofficial **optimized and enhanced** fork of [LatentSync 1.5](https://github.com/bytedance/LatentSync) implementation for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) on Windows and WSL 2.0.
 
