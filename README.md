@@ -2,6 +2,8 @@
 
 Unofficial **optimized and enhanced** fork of [LatentSync 1.5](https://github.com/bytedance/LatentSync) implementation for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) on Windows and WSL 2.0.
 
+Works with ComfyUI Portable version 3.49 https://github.com/comfyanonymous/ComfyUI/releases/tag/v0.3.49
+
 This node provides advanced lip-sync capabilities in ComfyUI using ByteDance's LatentSync 1.5 model with **significantly improved performance, memory efficiency, and stability**. This fork focuses on speed, reliability, and conflict-free coexistence with other LatentSync implementations.
 
 <img width="1893" height="1357" alt="workflow (4)" src="https://github.com/user-attachments/assets/51d3b98a-e549-4c71-a2f2-2af5cc52f291" />
